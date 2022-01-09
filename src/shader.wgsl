@@ -187,6 +187,8 @@ fn mul(a: ptr<function, Component>, b: ptr<function, Component>) -> Component {
     // We don't need to bother checking for overflow, because the highest these will ever be is 2 anyway.
     // Even if the camera is super far away or super zoomed out,
     // the point will be disqualified on the first iteration before any real arithmetic is done to it.
+
+    // TODO: we do actually have to worry about overflow now.
     out.int = (*a).int * (*b).int;
 
     let a_subint = &(*a).subint;
@@ -245,7 +247,7 @@ fn sub(a: ptr<function, Component>, b: ptr<function, Component>) {
 }
 
 fn double(num: ptr<function, Component>) {
-    (*num).int = 2u * (*num).int + (*num).subint[0] >> 31u;
+    (*num).int = 2 * (*num).int + i32((*num).subint[0] >> 31u);
     for (var i = 0u; i < comp_size; i = i + 1u) {
         if (i + 1u < comp_size) {
             (*num).subint[i] = (*num).subint[i] << 1u + (*num).subint[i + 1u] >> 31u;
@@ -277,30 +279,65 @@ fn square(num: ptr<function, Complex>) -> Complex {
     return out;
 }
 
+/// Sets `comp` to the value of `num`. Assumes that `comp` is zeroed to begin with.
+fn comp_from_f32(comp: ptr<function, Component>, num: f32) {
+    let int = floor(num);
+    let subint = num - int;
+    (*comp).int = i32(int);
+    if (subint != 0.0) {
+        // TODO: i should probably add some explanation of what I'm doing here.
+        let offset = u32(-floor(log2(subint))) - 1u;
+        let idx = offset / 32u;
+        let suboffset = offset % 32u;
+        if (idx < comp_size) {
+            (*comp).subint[idx] = u32(subint * exp2(f32(offset + 32u - suboffset)));
+
+            if (idx + 1u < comp_size) {
+                // The conversion to u32 is undefined if the float value is out of range, hence the modulus.
+                (*comp).subint[idx + 1u] = u32((subint * exp2(f32(offset + 64u - suboffset)) % 4294967296.0));
+            }
+        }
+    }
+}
+
 struct Settings {
     center: vec2<f32>;
 
-    camera: Complex;
-    zoom: f32;
-
     iterations: u32;
+
+    inv_zoom: Component;
+    camera: Complex;
 };
 
 [[group(0), binding(0)]] var<uniform> settings: Settings;
 
 [[stage(fragment)]]
 fn fs_main([[builtin(position)]] pixel: vec4<f32>) -> [[location(0)]] vec4<f32> {
-    let offset = pixel.xy - settings.center;
-    // Flip around the y, since in pixel space y gets bigger going downwards, whereas on the complex plane it's the reverse.
-    let pos = settings.camera + vec2<f32>(offset.x, -offset.y) / settings.zoom;
+    // we have to copy this because everything requires a ptr<function>, not a ptr<uniform>.
+    var inv_zoom = settings.inv_zoom;
 
-    var point = vec2<f32>(0.0, 0.0);
+    let offset = pixel.xy - settings.center;
+    var pos: Complex;
+    comp_from_f32(&pos.real, offset.x);
+    // Flip around the y, since in pixel space y gets bigger going downwards, whereas on the complex plane it's the reverse.
+    comp_from_f32(&pos.imag, -offset.y);
+    pos.real = mul(&pos.real, &inv_zoom);
+    pos.imag = mul(&pos.imag, &inv_zoom);
+
+    var point: Complex;
     var iters = 0u;
     loop {
-        point = square(point) + pos;
+        point = square(&point);
+        add(&point.real, &pos.real);
+        add(&point.imag, &pos.imag);
         iters = iters + 1u;
 
-        if (dot(point, point) > 4.0 || iters == settings.iterations) { break }
+        var len2 = mul(&point.real, &point.real);
+        var imag2 = mul(&point.imag, &point.imag);
+        add(&len2, &imag2);
+        // The value is >= 4 if the 4 bit or any higher bits of the integer are set.
+        // (Using >= instead of > does exclude -2 from the set when it should be included, but that's a tiny corner case.)
+        if ((u32(abs(len2.int)) >> 2u) > 0u || iters == settings.iterations) { break }
     }
 
     var l = f32(iters) / f32(settings.iterations);

@@ -1,3 +1,5 @@
+#![feature(bigint_helper_methods)]
+
 use std::fmt::Debug;
 use std::iter;
 use std::mem::size_of;
@@ -5,6 +7,7 @@ use std::num::NonZeroU64;
 
 use bytemuck::Pod;
 use bytemuck::Zeroable;
+use num::Complex;
 use wgpu::include_wgsl;
 use wgpu::util::BufferInitDescriptor;
 use wgpu::util::DeviceExt;
@@ -46,19 +49,21 @@ use wgpu::TextureViewDescriptor;
 use wgpu::VertexState;
 use winit::window::Window;
 
+pub mod num;
+
 const ITERATIONS: u32 = 1200;
 // The mandelbrot set ranges from -2 to 2, so multiplying that by 150 makes it take up a 600x600 space initially.
-const INITIAL_ZOOM: f32 = 150.0;
+pub const INITIAL_ZOOM: f32 = 150.0;
 
 #[derive(Clone, Copy, Zeroable, Pod, Debug)]
 #[repr(C)]
 pub struct Settings {
     center: [f32; 2],
 
+    iterations: u32,
+
     camera: [f32; 2],
     zoom: f32,
-
-    iterations: u32,
 }
 
 #[derive(Debug)]
@@ -72,7 +77,7 @@ pub struct State {
     pub swapchain_format: TextureFormat,
 
     // It's easier to keep a copy of these externally than read them from GPU memory every time.
-    pub camera: [f32; 2],
+    pub camera: Complex,
     pub zoom: f32,
 }
 
@@ -213,7 +218,7 @@ impl State {
             render_bundle,
             swapchain_format,
 
-            camera: [0.0, 0.0],
+            camera: Complex::default(),
             zoom: INITIAL_ZOOM,
         }
     }
@@ -280,7 +285,12 @@ impl State {
         self.queue.write_buffer(
             &self.settings_buffer,
             8,
-            bytemuck::cast_slice(&[self.camera[0], self.camera[1], self.zoom]),
+            bytemuck::cast_slice(&[self.camera.real, self.camera.imag, self.zoom]),
         )
+    }
+
+    // Gets the target length of components' subints given the current level of zoom.
+    pub fn comp_size(&self) {
+        
     }
 }

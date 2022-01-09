@@ -1,4 +1,5 @@
 use gpu_mandelbrot::State;
+use gpu_mandelbrot::INITIAL_ZOOM;
 use winit::dpi::LogicalPosition;
 use winit::dpi::LogicalSize;
 use winit::event::ElementState;
@@ -75,7 +76,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                         ];
 
                         state.update_camera();
-    
+
                         window.request_redraw();
                     }
 
@@ -91,7 +92,8 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                     let old_offset = [mouse_offset[0] / state.zoom, mouse_offset[1] / state.zoom];
 
                     state.zoom *= 1.1f32.powf(scrolled);
-                    // TODO: clamp zoom
+                    // Clamp the zoom to avoid having to deal with overflows in our fixed point numbers.
+                    state.zoom = f32::max(state.zoom, INITIAL_ZOOM);
 
                     // The new offset of the mouse from the camera in the complex plane.
                     let new_offset = [mouse_offset[0] / state.zoom, mouse_offset[1] / state.zoom];
